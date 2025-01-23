@@ -26,7 +26,7 @@ jobs:
 
       - name: Manual Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           ACTIVE_TAG=$(gh release view --json tagName --jq .tagName)
           NEXT_TAG=$(npx semver $ACTIVE_TAG --increment ${{ github.event.inputs.increment }})
