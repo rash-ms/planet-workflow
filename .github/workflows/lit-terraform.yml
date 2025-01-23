@@ -16,16 +16,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup node
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
         uses: actions/setup-node@v2
         with:
           node-version: 16.14.0
+
       - name: Manual Release
         env:
-          GIT_API_TOKEN: $ {{ secrets.GIT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ACTIVE_TAG=$(gh release view --json tagName --jq .tagName)
-          NEXT_TAG=$(npx smever $OLD_TAG --increment ${{ github.event.inputs.increment }})
+          NEXT_TAG=$(npx semver $ACTIVE_TAG --increment ${{ github.event.inputs.increment }})
           gh release create --generate-notes $NEXT_TAG
-
