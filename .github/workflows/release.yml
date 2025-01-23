@@ -1,0 +1,33 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: "Automated Increment for Semantic Versioning"
+        required: true
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: 16.14.0
+
+      - name: Manual Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName)
+          NEXT_TAG=$(npx semver $ACTIVE_TAG --increment ${{ github.event.inputs.increment }})
+          gh release create --generate-notes $NEXT_TAG
