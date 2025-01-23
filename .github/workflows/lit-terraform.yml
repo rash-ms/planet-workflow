@@ -1,0 +1,78 @@
+name: Reusable Terraform Workflow
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      environment_plan:
+        type: string
+        required: true
+      environment_apply:
+        type: string
+        required: true
+      infra_dir:
+        type: string
+        required: true
+      working_dir:
+        type: string
+        required: false
+      account_id:
+        type: string
+        required: true
+      aws_default_region:
+        type: string
+        required: true
+      main_branch:
+        type: string
+        required: false
+      enable_branch_apply:
+        type: boolean
+        required: false
+        default: false
+      continue_on_error:
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      aws_secret_key_id:
+        required: true
+      aws_secret_access_key:
+        required: true
+
+env:
+  INFRA_DIR: ${{ inputs.infra_dir }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_dir }}
+    environment:
+      name: ${{ inputs.environment_plan }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.aws_secret_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+          aws-region: ${{ inputs.aws_default_region }}
+
+      - name: Terraform Format
+        run: terraform fmt $INFRA_DIR
+
+      - name: Terraform Init
+        run: terraform init $INFRA_DIR
+
+      - name: Terraform Plan
+        run: terraform plan $INFRA_DIR
+        continue-on-error: ${{ inputs.continue_on_error }}
