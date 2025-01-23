@@ -1,30 +1,78 @@
-name: release
+name: Reusable Terraform Workflow
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      increment:
-        description: "Automated Increment for Semantic Versioning"
+      version:
+        type: string
         required: true
-        type: choice
-        options:
-          - major
-          - minor
-          - patch
+      environment_plan:
+        type: string
+        required: true
+      environment_apply:
+        type: string
+        required: true
+      infra_dir:
+        type: string
+        required: true
+      working_dir:
+        type: string
+        required: false
+      account_id:
+        type: string
+        required: true
+      aws_default_region:
+        type: string
+        required: true
+      main_branch:
+        type: string
+        required: false
+      enable_branch_apply:
+        type: boolean
+        required: false
+        default: false
+      continue_on_error:
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      aws_secret_key_id:
+        required: true
+      aws_secret_access_key:
+        required: true
+
+env:
+  INFRA_DIR: ${{ inputs.infra_dir }}
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  release:
+  plan:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_dir }}
+    environment:
+      name: ${{ inputs.environment_plan }}
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup node
-        uses: actions/setup-node@v2
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-          node-version: 16.14.0
-      - name: Manual Release
-        env:
-          GIT_API_TOKEN: $ {{ secrets.GIT_API_TOKEN }}
-        run: |
-          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName)
-          NEXT_TAG=$(npx smever $OLD_TAG --increment ${{ github.event.inputs.increment }})
-          gh release create --generate-notes $NEXT_TAG
+          aws-access-key-id: ${{ secrets.aws_secret_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+          aws-region: ${{ inputs.aws_default_region }}
+
+      - name: Terraform Format
+        run: terraform fmt $INFRA_DIR
+
+      - name: Terraform Init
+        run: terraform init $INFRA_DIR
+
+      - name: Terraform Plan
+        run: terraform plan $INFRA_DIR
+        continue-on-error: ${{ inputs.continue_on_error }}
