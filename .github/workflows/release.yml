@@ -16,18 +16,36 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # Setup Node.js environment
       - name: Setup Node.js
         uses: actions/setup-node@v2
         with:
           node-version: 16.14.0
 
-      - name: Manual Release
+      # Install dependencies (if semver is not already installed globally)
+      - name: Install Semver
+        run: npm install -g semver
+
+      # Determine the latest tag
+      - name: Determine Active Tag
+        id: tag
+        run: |
+          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName || echo "v0.0.0")
+          echo "ACTIVE_TAG=${ACTIVE_TAG}" >> $GITHUB_ENV
+
+      # Increment the version based on user input
+      - name: Increment Version
+        run: |
+          NEXT_TAG=$(npx semver $ACTIVE_TAG --increment ${{ github.event.inputs.increment }})
+          echo "NEXT_TAG=${NEXT_TAG}" >> $GITHUB_ENV
+
+      # Create a new GitHub release
+      - name: Create Release
+        run: |
+          gh release create $NEXT_TAG --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName)
-          NEXT_TAG=$(npx semver $ACTIVE_TAG --increment ${{ github.event.inputs.increment }})
-          gh release create --generate-notes $NEXT_TAG
