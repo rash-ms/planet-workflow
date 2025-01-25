@@ -12,16 +12,11 @@ jobs:
   delete-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Install GitHub CLI
-        run: sudo apt-get install gh -y
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
       - name: Authenticate GitHub CLI
-        run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
 
       - name: Delete Release
         run: gh release delete ${{ github.event.inputs.release_tag }} -y
-
-      - name: Delete Tag
-        run: |
-          git tag -d ${{ github.event.inputs.release_tag }}
-          git push origin --delete ${{ github.event.inputs.release_tag }}
