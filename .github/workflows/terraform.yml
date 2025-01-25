@@ -227,7 +227,7 @@ jobs:
                     value="${line#*=}"
                     echo "::add-mask::$value"
                 done
-                
+
             - name: Write tf_env_vars to GITHUB_ENV file
               run: |
                 cat > $GITHUB_ENV << EOF
