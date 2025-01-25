@@ -1,0 +1,60 @@
+on:
+    workflow_call:
+        inputs:
+            version:
+                description: "Terraform Version to be used"
+                type: string
+                default: "~1.2.6"
+            environment:
+                description: "The Github environnment to pull secret"
+                required: false
+                type: string
+            working_dir:
+                required: true
+                type: string
+            backend_tfvars_path:
+                type: string
+                required: true
+            lock_id:
+                description: "Terraform lock identifier to be release"
+                type: string
+                required: true
+        secrets:
+            aws_access_key_id:
+                description: AWS Access key ID
+                required: true
+            aws_secret_access_key:
+                description: AWS Secret Access Key 
+                required: true
+
+env: 
+    AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key}}
+
+jobs:
+    terraform-unlock:
+        name: unlock terraform lock
+        runs-on: ubuntu-latest
+        environment:
+            name: ${{ inputs.environment }}
+        defaults:
+            run:
+                working-directory: ${{ inputs.working_dir }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            
+            - name: Setup Terraform
+              uses: hashicorp/setup-terraform@v2
+              with:
+                terraform_version: ${{ inputs.version }}
+
+            - name: Terraform Format
+              run: terraform fmt -check
+
+            - name: Terraform Init
+              run: |
+                terrafrm init -backend-config ${{ inputs.backend_tfvars_path }}
+
+            - name: Unlock terraform State
+              run: terraform force-unlock -force ${{ inputs.lock_id }}

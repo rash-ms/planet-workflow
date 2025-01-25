@@ -34,7 +34,7 @@ jobs:
       - name: Determine Active Tag
         id: tag
         run: |
-          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName || echo "v0.0.0")
+          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName || echo "0.0.0")
           echo "ACTIVE_TAG=${ACTIVE_TAG}" >> $GITHUB_ENV
 
       # Increment the version based on user input

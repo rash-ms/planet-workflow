@@ -27,6 +27,7 @@ on:
       main_branch:
         type: string
         required: false
+        default: main
       enable_branch_apply:
         type: boolean
         required: false
@@ -36,10 +37,10 @@ on:
         required: false
         default: false
     secrets:
-      aws_secret_key_id:
+      role-to-assume:
         required: true
-      aws_secret_access_key:
-        required: true
+      tf_env_vars:
+        required: false
 
 env:
   INFRA_DIR: ${{ inputs.infra_dir }}
@@ -60,19 +61,84 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          aws-access-key-id: ${{ secrets.aws_secret_key_id }}
-          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
-          aws-region: ${{ inputs.aws_default_region }}
+            role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ secrets.role_to_assume }}
+            aws-region: ${{ inputs.aws_default_region }}
+
+      - name: Masked secret tf_ev_vars values
+        run: |
+          echo "${{ secrets.tf_env_vars }}" | while IFS= read -r line ; do
+              value="${line#*=}"
+              echo "::add-mask::$value"
+          done
+
+      - name: Write tf_env_vars to GITHUB_ENV file
+        run: |
+          cat > $GITHUB_ENV << EOF
+          ${{ secrets.tf_env_vars }}
+          EOF
 
       - name: Terraform Format
-        run: terraform fmt $INFRA_DIR
+        run: lit-terraform fmt $INFRA_DIR
 
       - name: Terraform Init
-        run: terraform init $INFRA_DIR
+        run: lit-terraform init $INFRA_DIR
 
       - name: Terraform Plan
-        run: terraform plan $INFRA_DIR
+        run: lit-terraform plan $INFRA_DIR
+        continue-on-error: ${{ inputs.continue_on_error }}
+        
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
+          path: |
+            ${{ inputs.working_dir }}/lit-terraform-plan/**/*.plan
+            ${{ inputs.working_dir }}/lit-terraform-plan/**/*.json
+            ${{ inputs.working_dir }}/lit-terraform-plan/**/*.hcl
+          retention-days: 1
+
+  apply:
+    needs: plan
+    if: ${{ github.ref_name == inputs.main_branch || inputs.enable_branch_apply }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_dir }}
+    environment:
+      name: ${{ inputs.environment_apply }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+            role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ secrets.role_to_assume }}
+            aws-region: ${{ inputs.aws_default_region }}
+
+      - name: Masked secret tf_ev_vars values
+        run: |
+          echo "${{ secrets.tf_env_vars }}" | while IFS= read -r line ; do
+              value="${line#*=}"
+              echo "::add-mask::$value"
+          done
+
+      - name: Write tf_env_vars to GITHUB_ENV file
+        run: |
+          cat > $GITHUB_ENV << EOF
+          ${{ secrets.tf_env_vars }}
+          EOF
+
+      - name: terraform init
+        run: lit-terraform init ${INFRA_DIR}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
+          path: |
+            ${{ inputs.working_dir }}/lit-terraform-plan
+      - name: terraform apply
+        run: lit-terraform apply ${INFRA_DIR}
         continue-on-error: ${{ inputs.continue_on_error }}
