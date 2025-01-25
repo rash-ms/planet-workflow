@@ -20,9 +20,6 @@ on:
             main_branch:
                 type: string
                 default: main
-            account_id:
-                type: string
-                required: true
             infra_dir:
                 type: string
                 required: true
@@ -41,6 +38,8 @@ on:
                 required: false
                 default: 1
         secrets:
+            account_id:
+                required: true
             role_to_assume:
                 required: true
             tf_env_vars:
@@ -66,7 +65,7 @@ jobs:
             - name: Configure AWS credentials using OIDC
               uses: aws-actions/configure-aws-credentials@v2
               with:
-                  role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ secrets.role_to_assume }}
+                  role-to-assume: arn:aws:iam::${{ secrets.account_id }}:role/${{ secrets.role_to_assume }}
                   aws-region: ${{ inputs.aws_default_region }}
         
             - uses: hashicorp/setup-terraform@v3
@@ -207,7 +206,7 @@ jobs:
             - name: Configure AWS credentials using OIDC
               uses: aws-actions/configure-aws-credentials@v2
               with:
-                  role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ secrets.role_to_assume }}
+                  role-to-assume: arn:aws:iam::${{ secrets.account_id }}:role/${{ secrets.role_to_assume }}
                   aws-region: ${{ inputs.aws_default_region }}
 
             - uses: hashicorp/setup-terraform@v3
