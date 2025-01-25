@@ -37,7 +37,7 @@ on:
         required: false
         default: false
     secrets:
-      role-to-assume:
+      role_to_assume:
         required: true
       tf_env_vars:
         required: false
@@ -89,7 +89,7 @@ jobs:
       - name: Terraform Plan
         run: lit-terraform plan $INFRA_DIR
         continue-on-error: ${{ inputs.continue_on_error }}
-        
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
