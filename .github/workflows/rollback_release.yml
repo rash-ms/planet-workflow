@@ -18,10 +18,20 @@ jobs:
       - name: Authenticate GitHub CLI
         run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
 
+    #   - name: Delete Release
+    #     run: gh release delete ${{ github.event.inputs.release_tag }} -y
+
+    #   - name: Delete Associated Tag
+    #     run: |
+    #         git tag -d ${{ github.event.inputs.release_tag }}
+    #         git push origin --delete ${{ github.event.inputs.release_tag }}
+
+
       - name: Delete Release
         run: gh release delete ${{ github.event.inputs.release_tag }} -y
-
+  
       - name: Delete Associated Tag
         run: |
-            git tag -d ${{ github.event.inputs.release_tag }}
-            git push origin --delete ${{ github.event.inputs.release_tag }}
+              git fetch --tags
+              git tag -d ${{ github.event.inputs.release_tag }}
+              git push origin --delete ${{ github.event.inputs.release_tag }}
