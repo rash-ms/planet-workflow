@@ -15,31 +15,22 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Authenticate GitHub CLI
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
-  
-      - name: Delete Associated Tag
+      - name: Delete Release
         run: |
-              git fetch --tags
-              git tag -d ${{ github.event.inputs.release_tag }}
-              git push origin --delete ${{ github.event.inputs.release_tag }}
-
-              - name: Delete Release
-              run: |
-                if gh release view ${{ github.event.inputs.release_tag }} > /dev/null 2>&1; then
-                  echo "Deleting release ${{ github.event.inputs.release_tag }}..."
-                  gh release delete ${{ github.event.inputs.release_tag }} -y
-                else
-                  echo "Release ${{ github.event.inputs.release_tag }} does not exist. Skipping."
-                fi
-      
-      - name: Delete Associated Tag
-        run: |
-          git fetch --tags
-          if git rev-parse ${{ github.event.inputs.release_tag }} >/dev/null 2>&1; then
-              echo "Deleting tag ${{ github.event.inputs.release_tag }}..."
-              git tag -d ${{ github.event.inputs.release_tag }}
-              git push origin --delete ${{ github.event.inputs.release_tag }}
+          if gh release view ${{ github.event.inputs.release_tag }} > /dev/null 2>&1; then
+            echo "Deleting release ${{ github.event.inputs.release_tag }}..."
+            gh release delete ${{ github.event.inputs.release_tag }} -y
           else
-              echo "Tag ${{ github.event.inputs.release_tag }} does not exist. Skipping."
+            echo "Release ${{ github.event.inputs.release_tag }} does not exist. Skipping."
           fi
+
+      - name: Delete Associated Tag
+        run: |
+            git fetch --tags
+            if git rev-parse ${{ github.event.inputs.release_tag }} > /dev/null 2>&1; then
+                echo "Deleting tag ${{ github.event.inputs.release_tag }}..."
+                git tag -d ${{ github.event.inputs.release_tag }}
+                git push origin --delete ${{ github.event.inputs.release_tag }}
+            else
+                echo "Tag ${{ github.event.inputs.release_tag }} does not exist. Skipping."
+            fi
