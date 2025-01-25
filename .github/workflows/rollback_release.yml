@@ -1,0 +1,27 @@
+name: Delete Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag of the release to delete"
+        required: true
+        type: string
+
+jobs:
+  delete-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install GitHub CLI
+        run: sudo apt-get install gh -y
+
+      - name: Authenticate GitHub CLI
+        run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Delete Release
+        run: gh release delete ${{ github.event.inputs.release_tag }} -y
+
+      - name: Delete Tag
+        run: |
+          git tag -d ${{ github.event.inputs.release_tag }}
+          git push origin --delete ${{ github.event.inputs.release_tag }}
