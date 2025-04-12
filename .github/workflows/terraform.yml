@@ -124,8 +124,8 @@ jobs:
 
             - name: Terraform Format
               run: |
-                set +e
-                infra_dirs=(${{ steps.terraform_modules.outputs.infra_dir }})
+                error_flag=0
+                IFS=',' read -r -a infra_dirs <<< "${{ steps.terraform_modules.outputs.infra_dir }}"
                 for infra_dir in "${infra_dirs[@]}"; do
                     module=$(basename "$infra_dir")
                     echo -e "\003[35m Format: ${{ inputs.working_dir }}/terraform/$module \033[0m \n"
