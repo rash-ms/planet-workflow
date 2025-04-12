@@ -66,6 +66,12 @@ jobs:
             role-to-assume: arn:aws:iam::${{ secrets.account_id }}:role/${{ secrets.role_to_assume }}
             aws-region: ${{ inputs.aws_default_region }}
 
+      - uses: hashicorp/setup-terraform@v3
+        name: Setup Terraform
+        with:
+          terraform_version: ${{ inputs.version }}
+          terraform_wrapper: false
+
       - name: Masked secret tf_ev_vars values
         run: |
           echo "${{ secrets.tf_env_vars }}" | while IFS= read -r line ; do
@@ -117,6 +123,12 @@ jobs:
         with:
             role-to-assume: arn:aws:iam::${{ secrets.account_id }}:role/${{ secrets.role_to_assume }}
             aws-region: ${{ inputs.aws_default_region }}
+
+      - uses: hashicorp/setup-terraform@v3
+        name: Setup Terraform
+        with:
+          terraform_version: ${{ inputs.version }}
+          terraform_wrapper: false
 
       - name: Masked secret tf_ev_vars values
         run: |
