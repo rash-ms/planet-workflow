@@ -167,7 +167,7 @@ jobs:
               id: plan
               run: |
                 set +e
-                mkdir -p "terraform plan"
+                mkdir -p "terraform_plan"
                 infra_dirs=(${{ steps.terraform_modules.outputs.infra_dir }})
                 for infra_dir in "${infra_dirs[@]}"; do
                     module=$(basename "$infra_dir")
@@ -215,6 +215,8 @@ jobs:
               run: |
                  echo "AWS Account: $(aws sts get-caller-identity --query Account --output text)"
                  echo "Role Verified: $(aws sts get-caller-identity --query Arn --output text | sed 's/:[^:]*$/:**MASKED**/g')"
+                 echo "Verifying AWS Identity..."
+                 aws sts get-caller-identity
 
             - name: Masked secret tf_ev_vars values
               run: |
