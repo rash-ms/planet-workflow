@@ -105,9 +105,9 @@ jobs:
                         module=$(basename "$module_dir")
                         sub_dirs=($(find "$module_dir" -mindepth 1 -maxdepth 1 -type d))
                         if [ ${#sub_dirs[@]} -gt 0 ]; then
-                            for sub_dir in "${sub_dir[@]}"; do
-                                nested_dir=($(find "$sub_dir" -mindepth 1 -maxdepth 1 -type d))
-                                if [ ${#nested_dir[@]} -gt 0 ]; then
+                            for sub_dir in "${sub_dirs[@]}"; do
+                                nested_dirs=($(find "$sub_dir" -mindepth 1 -maxdepth 1 -type d))
+                                if [ ${#nested_dirs[@]} -gt 0 ]; then
                                     for nested_dir in "${nested_dirs[@]}"; do
                                         infra_dir+=("${{inputs.infra_dir }}/$module/$(basename "$sub_dir")/$(basename "$nested_dir")")
                                     done
