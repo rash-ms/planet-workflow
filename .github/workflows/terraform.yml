@@ -238,7 +238,7 @@ jobs:
               with:
                   name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
                   path: |
-                      terraform_plan/${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}           
+                      terraform_plan/      
 
             - name: Initialising Terraform
               run: |
@@ -263,7 +263,7 @@ jobs:
                       echo -e "-------------\n \033[35m Apply: $infra_dir \033[0m \n -------------"
                       cd "${{ inputs.working_dir }}/terraform/$module" > /dev/null || exit 1
                       plan_dir="${infra_dir//\//-}"
-                      plan_path="$GITHUB_WORKSPACE/terraform_plan/${{ github.workflow }}-${{ github.run_id}}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}/${plan_dir}.plan"  
+                      plan_path="$GITHUB_WORKSPACE/terraform_plan/${plan_dir}.plan"  
                       
                       if [[ ! -f "$plan_path" ]]; then
                           echo "Plan file not found at: $plan_path"
@@ -274,4 +274,3 @@ jobs:
                       cd - > /dev/null
                   done
                   set -e
-  
