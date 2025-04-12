@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       increment:
-        description: "Automated Increment for Semantic Versioning"
+        description: "Select semantic version increment"
         required: true
         type: choice
         options:
@@ -15,37 +15,67 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+
     steps:
-      # Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Setup Node.js environment
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v2
         with:
           node-version: 16.14.0
 
-      # Install dependencies (if semver is not already installed globally)
-      - name: Install Semver
+      - name: Install semver
         run: npm install -g semver
 
-      # Determine the latest tag
-      - name: Determine Active Tag
-        id: tag
+      - name: Get latest tag
+        id: get_latest_tag
         run: |
-          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName || echo "0.0.0")
-          echo "ACTIVE_TAG=${ACTIVE_TAG}" >> $GITHUB_ENV
+          git fetch --tags
+          LATEST_TAG=$(git tag --sort=-v:refname | tail -n 1)
 
-      # Increment the version based on user input
-      - name: Increment Version
+          if [[ -z "$LATEST_TAG" ]]; then
+            # No tag exists yet, start from 1.0.0
+            BASE_TAG="1.0.0"
+            echo "No existing tags. Starting with $BASE_TAG"
+          else
+            BASE_TAG="$LATEST_TAG"
+            echo "Found existing tag: $BASE_TAG"
+          fi
+
+          echo "BASE_TAG=$BASE_TAG" >> $GITHUB_ENV
+          echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Calculate next version
+        id: calc_next_tag
         run: |
-          NEXT_TAG=$(npx semver $ACTIVE_TAG --increment ${{ github.event.inputs.increment }})
-          echo "NEXT_TAG=${NEXT_TAG}" >> $GITHUB_ENV
+          if [[ "$BASE_TAG" == "1.0.0" && "$(git tag -l | wc -l)" -eq 0 ]]; then
+            # Just use 1.0.0 if it's the first release
+            NEXT_TAG="1.0.0"
+          else
+            NEXT_TAG=$(npx semver $BASE_TAG -i ${{ github.event.inputs.increment }})
+          fi
 
-      # Create a new GitHub release
-      - name: Create Release
+          echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_ENV
+          echo "next_tag=$NEXT_TAG" >> $GITHUB_OUTPUT
+          echo "Next tag will be: $NEXT_TAG"
+
+      - name: Check if tag already exists
+        run: |
+          if git rev-parse "refs/tags/${NEXT_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${NEXT_TAG} already exists. Exiting."
+            exit 1
+          fi
+
+      - name: Create Git tag and push
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag $NEXT_TAG
+          git push origin $NEXT_TAG
+
+      - name: Create GitHub Release
         run: |
           gh release create $NEXT_TAG --generate-notes
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
