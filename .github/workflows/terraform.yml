@@ -191,8 +191,12 @@ jobs:
                 name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
                 path: |
                     terraform_plan/*.plan
-                    retention_days: ${{ inputs.retention_days }}
-
+                retention-days: ${{ inputs.retention_days }}
+                  
+            - name: Verify Plan Files Before Upload
+              run: |
+                ls -l terraform_plan/
+             
     apply:
         needs: plan
         if: ${{ github.ref_name == inputs.main_branch || inputs.enable_branch_apply == true }}
