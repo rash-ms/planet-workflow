@@ -78,13 +78,9 @@ jobs:
               run: |
                 echo "AWS Account: $(aws sts get-caller-identity --query Account --output text)"
                 echo "Role Verified: $(aws sts get-caller-identity --query Arn --output text | sed 's/:[^:]*$/:**MASKED**/g')"
-            
-
-            - name: Verify Caller Identity
-              run: |
                 echo "Verifying AWS Identity..."
                 aws sts get-caller-identity
-
+            
             - name: Masked secret tf_ev_vars values
               run: |
                 echo "${{ secrets.tf_env_vars }}" | while IFS= read -r line ; do
@@ -109,11 +105,11 @@ jobs:
                         module=$(basename "$module_dir")
                         sub_dirs=($(find "$module_dir" -mindepth 1 -maxdepth 1 -type d))
                         if [ ${#sub_dirs[@]} -gt 0 ]; then
-                            for sub_dir in "${sub_dir[@]}"; do
-                                nested_dir=($(find "$sub_dir" -mindepth 1 -maxdepth 1 -type d))
-                                if [ ${#nested_dir[@]} -gt 0 ]; then
+                            for sub_dir in "${sub_dirs[@]}"; do
+                                nested_dirs=($(find "$sub_dir" -mindepth 1 -maxdepth 1 -type d))
+                                if [ ${#nested_dirs[@]} -gt 0 ]; then
                                     for nested_dir in "${nested_dirs[@]}"; do
-                                        infra_dir+= ("${{inputs.infra_dir }}/$module/$(basename "$sub_dir")/$(basename "$nested_dir")")
+                                        infra_dir+=("${{inputs.infra_dir }}/$module/$(basename "$sub_dir")/$(basename "$nested_dir")")
                                     done
                                 else
                                     infra_dir+=("${{ inputs.infra_dir }}/$module/$(basename "$sub_dir")")
