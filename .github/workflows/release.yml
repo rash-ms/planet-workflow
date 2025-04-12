@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       increment:
-        description: "Select semver increment"
+        description: "Select semantic version increment"
         required: true
         type: choice
         options:
@@ -32,25 +32,47 @@ jobs:
         id: get_latest_tag
         run: |
           git fetch --tags
-          LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
+          LATEST_TAG=$(git tag --sort=-v:refname | tail -n 1)
+
           if [[ -z "$LATEST_TAG" ]]; then
-            LATEST_TAG="0.0.0"
+            # No tag exists yet, start from 1.0.0
+            BASE_TAG="1.0.0"
+            echo "No existing tags. Starting with $BASE_TAG"
+          else
+            BASE_TAG="$LATEST_TAG"
+            echo "Found existing tag: $BASE_TAG"
           fi
-          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+
+          echo "BASE_TAG=$BASE_TAG" >> $GITHUB_ENV
+          echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
 
       - name: Calculate next version
-        id: next_version
+        id: calc_next_tag
         run: |
-          NEXT_TAG=$(npx semver ${LATEST_TAG} -i ${{ github.event.inputs.increment }})
+          if [[ "$BASE_TAG" == "1.0.0" && "$(git tag -l | wc -l)" -eq 0 ]]; then
+            # Just use 1.0.0 if it's the first release
+            NEXT_TAG="1.0.0"
+          else
+            NEXT_TAG=$(npx semver $BASE_TAG -i ${{ github.event.inputs.increment }})
+          fi
+
           echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_ENV
           echo "next_tag=$NEXT_TAG" >> $GITHUB_OUTPUT
+          echo "Next tag will be: $NEXT_TAG"
 
-      - name: Check if tag exists
+      - name: Check if tag already exists
         run: |
           if git rev-parse "refs/tags/${NEXT_TAG}" >/dev/null 2>&1; then
             echo "Tag ${NEXT_TAG} already exists. Exiting."
             exit 1
           fi
+
+      - name: Create Git tag and push
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag $NEXT_TAG
+          git push origin $NEXT_TAG
 
       - name: Create GitHub Release
         run: |
