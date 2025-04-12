@@ -80,22 +80,22 @@ jobs:
           EOF
 
       - name: Terraform Format
-        run: lit-terraform fmt $INFRA_DIR
+        run: terraform fmt $INFRA_DIR
 
       - name: Terraform Init
-        run: lit-terraform init $INFRA_DIR
+        run: terraform init $INFRA_DIR
 
       - name: Terraform Plan
-        run: lit-terraform plan $INFRA_DIR
+        run: terraform plan $INFRA_DIR
         continue-on-error: ${{ inputs.continue_on_error }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
           path: |
-            ${{ inputs.working_dir }}/lit-terraform-plan/**/*.plan
-            ${{ inputs.working_dir }}/lit-terraform-plan/**/*.json
-            ${{ inputs.working_dir }}/lit-terraform-plan/**/*.hcl
+            ${{ inputs.working_dir }}/terraform-plan/**/*.plan
+            ${{ inputs.working_dir }}/terraform-plan/**/*.json
+            ${{ inputs.working_dir }}/terraform-plan/**/*.hcl
           retention-days: 1
 
   apply:
@@ -132,12 +132,12 @@ jobs:
           EOF
 
       - name: terraform init
-        run: lit-terraform init ${INFRA_DIR}
+        run: terraform init ${INFRA_DIR}
       - uses: actions/download-artifact@v4
         with:
           name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
           path: |
-            ${{ inputs.working_dir }}/lit-terraform-plan
+            ${{ inputs.working_dir }}/terraform-plan
       - name: terraform apply
-        run: lit-terraform apply ${INFRA_DIR}
+        run: terraform apply ${INFRA_DIR}
         continue-on-error: ${{ inputs.continue_on_error }}
