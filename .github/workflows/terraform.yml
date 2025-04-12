@@ -238,8 +238,7 @@ jobs:
               with:
                   name: ${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
                   path: |
-                      terraform_plan/${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}
-
+                      terraform_plan/${{ github.workflow }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}           
 
             - name: Initialising Terraform
               run: |
@@ -253,8 +252,7 @@ jobs:
                     cd - > /dev/null
                 done
                 if [[ error_flag -ne 0 ]]; then exit 1; fi
-
-
+                
             - name: Terraform Plan
               id: plan
               run: |
@@ -265,7 +263,15 @@ jobs:
                       echo -e "-------------\n \033[35m Apply: $infra_dir \033[0m \n -------------"
                       cd "${{ inputs.working_dir }}/terraform/$module" > /dev/null || exit 1
                       plan_dir="${infra_dir//\//-}"
-                      terraform apply "$GITHUB_WORKSPACE/terraform_plan/${{ github.workflow }}-${{ github.run_id}}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}/${plan_dir}.plan" || error_flag=1
+                      plan_path="$GITHUB_WORKSPACE/terraform_plan/${{ github.workflow }}-${{ github.run_id}}-${{ github.run_attempt }}-${{ hashFiles(format('{0}/{1}', inputs.working_dir, inputs.infra_dir)) }}/${plan_dir}.plan"  
+                      
+                      if [[ ! -f "$plan_path" ]]; then
+                          echo "Plan file not found at: $plan_path"
+                          exit 1
+                      fi  
+                      
+                      terraform apply "$plan_path" || exit 1
                       cd - > /dev/null
                   done
-                  if [[ error_flag -ne 0 ]]; then exit 1; fi
+                  set -e
+  
