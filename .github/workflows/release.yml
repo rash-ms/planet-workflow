@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       increment:
-        description: "Automated Increment for Semantic Versioning"
+        description: "Select semver increment"
         required: true
         type: choice
         options:
@@ -15,37 +15,45 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+
     steps:
-      # Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Setup Node.js environment
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v2
         with:
           node-version: 16.14.0
 
-      # Install dependencies (if semver is not already installed globally)
-      - name: Install Semver
+      - name: Install semver
         run: npm install -g semver
 
-      # Determine the latest tag
-      - name: Determine Active Tag
-        id: tag
+      - name: Get latest tag
+        id: get_latest_tag
         run: |
-          ACTIVE_TAG=$(gh release view --json tagName --jq .tagName || echo "0.0.0")
-          echo "ACTIVE_TAG=${ACTIVE_TAG}" >> $GITHUB_ENV
+          git fetch --tags
+          LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
+          if [[ -z "$LATEST_TAG" ]]; then
+            LATEST_TAG="0.0.0"
+          fi
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
 
-      # Increment the version based on user input
-      - name: Increment Version
+      - name: Calculate next version
+        id: next_version
         run: |
-          NEXT_TAG=$(npx semver $ACTIVE_TAG --increment ${{ github.event.inputs.increment }})
-          echo "NEXT_TAG=${NEXT_TAG}" >> $GITHUB_ENV
+          NEXT_TAG=$(npx semver ${LATEST_TAG} -i ${{ github.event.inputs.increment }})
+          echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_ENV
+          echo "next_tag=$NEXT_TAG" >> $GITHUB_OUTPUT
 
-      # Create a new GitHub release
-      - name: Create Release
+      - name: Check if tag exists
+        run: |
+          if git rev-parse "refs/tags/${NEXT_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${NEXT_TAG} already exists. Exiting."
+            exit 1
+          fi
+
+      - name: Create GitHub Release
         run: |
           gh release create $NEXT_TAG --generate-notes
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
