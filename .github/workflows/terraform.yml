@@ -152,7 +152,7 @@ jobs:
             - name: Terraform Validate
               run: |
                 set +e
-                infra_dirs=(${{ steps.terraform_modules.outputs.infra_dir }})
+                IFS=',' read -r -a infra_dirs <<< "${{ steps.terraform_modules.outputs.infra_dir }}"
                 for infra_dir in "${infra_dirs[@]}"; do
                     module=$(basename "$infra_dir")
                     echo -e "---------------\n \033[35m Validate: ${{ inputs.working_dir }}/terraform/$module |033[0m \n-------------"
@@ -170,7 +170,7 @@ jobs:
               run: |
                 set +e
                 mkdir -p "terraform_plan"
-                infra_dirs=(${{ steps.terraform_modules.outputs.infra_dir }})
+                IFS=',' read -r -a infra_dirs <<< "${{ steps.terraform_modules.outputs.infra_dir }}"
                 for infra_dir in "${infra_dirs[@]}"; do
                     module=$(basename "$infra_dir")
                     echo -e "-------------\n \033[35m plan: $infra_dir \033[0m \n -------------"
@@ -251,7 +251,7 @@ jobs:
             - name: Initialising Terraform
               run: |
                 set +e
-                infra_dirs=(${{ needs.plan.outputs.infra_dir }})
+                IFS=',' read -r -a infra_dirs <<< "${{ needs.plan.outputs.infra_dir }}"
                 for infra_dir in "${infra_dirs[@]}"; do
                     module=$(basename "$infra_dir")
                     echo -e "--------------- \n \033 [35m init: $infra_dir \033[0m \n--------------"
@@ -265,7 +265,7 @@ jobs:
               id: plan
               run: |
                   set +e
-                  infra_dirs=(${{ needs.plan.outputs.infra_dir }})
+                  IFS=',' read -r -a infra_dirs <<< "${{ needs.plan.outputs.infra_dir }}"
                   for infra_dir in "${infra_dirs[@]}"; do
                       module=$(basename "$infra_dir")
                       echo -e "-------------\n \033[35m Apply: $infra_dir \033[0m \n -------------"
