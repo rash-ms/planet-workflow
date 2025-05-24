@@ -17,6 +17,10 @@ on:
               description: "The prefix of the Github env for the apply"
               required: false
               type: string
+          notify_environment:
+              description: "The prefix of the Github env for the apply"
+              required: false
+              type: string
           main_branch:
               type: string
               default: main
@@ -321,6 +325,7 @@ jobs:
   notify:
     name: Notify destroy webhook
     runs-on: ubuntu-latest
+    environment: ${{ inputs.notify_environment }}
     needs: 
         - plan
         - apply
