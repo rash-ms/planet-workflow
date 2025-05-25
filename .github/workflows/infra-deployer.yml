@@ -339,13 +339,10 @@ jobs:
           TOKEN="${{ secrets.destroyer_token }}"
           WEBHOOK_URL="${{ secrets.render_webhook_url }}"
 
-          PAYLOAD=$(jq -n \
-            --arg token "$TOKEN" \
-            --arg infra_dir "$INFRA_DIR" \
-            '{token: $token, infra_dir: $infra_dir}')
+          PAYLOAD="{\"token\":\"$TOKEN\",\"infra_dir\":\"$INFRA_DIR\"}"
 
           echo "Sending payload: $PAYLOAD"
-
+      
           response=$(curl -s -w "%{http_code}" -o response.out -X POST "$WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
