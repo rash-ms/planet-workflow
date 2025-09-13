@@ -27,11 +27,6 @@ on:
       slack_bot_token:
         required: false
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-
 concurrency:
   group: release-issue-${{ inputs.issue_number }}
   cancel-in-progress: true
@@ -270,7 +265,7 @@ jobs:
           echo "author=$(jq -r .author.login <<<"$j")" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack via bot (optional)
-        if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' && steps.pr.outputs.base == ${{ inputs.target_branch }} }}
+        if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' && steps.pr.outputs.base == inputs.target_branch }}
         uses: slackapi/slack-github-action@v1
         with:
           channel-id: ${{ inputs.slack_channel }}
