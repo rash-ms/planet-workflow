@@ -1,6 +1,6 @@
 name: stg-pr-main
 
-on: 
+on:
   workflow_call:
     inputs:
       issue_body:
@@ -12,15 +12,20 @@ on:
       issue_opener:
         type: string
         required: true
-      repository:
+      repository:            # owner/repo of the target repo
         type: string
         required: true
       slack_channel:
         type: string
         required: false
         default: ""
+      target_branch:         # PR will be opened against this branch (was 'main')
+        type: string
+        required: false
+        default: "main"
     secrets:
-      slack_bot_token: { required: false }
+      slack_bot_token:
+        required: false
 
 permissions:
   contents: write
@@ -34,15 +39,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      has_changes:       ${{ steps.merge.outputs.HAS_CHANGES }}
-      release_branch:    ${{ steps.mk.outputs.BRANCH }}
-      release_pr_number: ${{ steps.pr.outputs.number }}
-      release_pr_url:    ${{ steps.pr.outputs.url }}
-      included_prs:      ${{ steps.combine.outputs.PR_LIST }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, repository: ${{ inputs.repository }} }
 
       - name: Configure git
         run: |
@@ -52,23 +56,25 @@ jobs:
       - name: Read and validate form values (fail if missing)
         id: form
         env:
-          ISSUE_BODY: ${{ inputs.issue_body }}
+          ISSUE_BODY:  ${{ inputs.issue_body }}
           ISSUE_OPENER: ${{ inputs.issue_opener }}
         run: |
           set -euo pipefail
           BODY="$RUNNER_TEMP/body.txt"
           printf '%s\n' "$ISSUE_BODY" > "$BODY"
 
-          # helpers
+          # helpers to extract fields from the Issue Form body
           get_field () {
-            awk -v prefix="$1" 'BEGIN{f=0}
-              /^###[[:space:]]/{l=$0;sub(/^###[[:space:]]*/,"",l); f=(index(l,prefix)==1); next}
-              f{print}' "$BODY" | sed '/^[[:space:]]*$/d' | head -n1 | xargs
+            awk -v prefix="$1" 'BEGIN{flag=0}
+              /^###[[:space:]]/{ line=$0; sub(/^###[[:space:]]*/,"",line); flag=(index(line,prefix)==1); next }
+              flag { print }
+            ' "$BODY" | sed '/^[[:space:]]*$/d' | head -n1 | xargs
           }
           get_section_lines () {
-            awk -v prefix="$1" 'BEGIN{f=0}
-              /^###[[:space:]]/{l=$0;sub(/^###[[:space:]]*/,"",l); f=(index(l,prefix)==1); next}
-              f{print}' "$BODY" | sed '/^[[:space:]]*$/d'
+            awk -v prefix="$1" 'BEGIN{flag=0}
+              /^###[[:space:]]/{ line=$0; sub(/^###[[:space:]]*/,"",line); flag=(index(line,prefix)==1); next }
+              flag { print }
+            ' "$BODY" | sed '/^[[:space:]]*$/d'
           }
 
           GH_USERNAME=$(get_field "GitHub username")
@@ -105,12 +111,12 @@ jobs:
       - name: Find PRs by author/base/state updated within days_back
         id: find
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ inputs.repository }}
-          GH_USERNAME: ${{ steps.form.outputs.GH_USERNAME }}
-          BASE: ${{ steps.form.outputs.BASE }}
-          STATE: ${{ steps.form.outputs.STATE }}
-          DAYS: ${{ steps.form.outputs.DAYS_BACK }}
+          GH_TOKEN:     ${{ github.token }}
+          REPO:         ${{ inputs.repository }}
+          GH_USERNAME:  ${{ steps.form.outputs.GH_USERNAME }}
+          BASE:         ${{ steps.form.outputs.BASE }}
+          STATE:        ${{ steps.form.outputs.STATE }}
+          DAYS:         ${{ steps.form.outputs.DAYS_BACK }}
         run: |
           set -euo pipefail
           SINCE=$(date -u -d "-${DAYS:-14} days" +%Y-%m-%d)
@@ -150,8 +156,8 @@ jobs:
         id: preflight
         env:
           GH_TOKEN: ${{ github.token }}
-          PRS: ${{ steps.combine.outputs.PR_LIST }}
-          REPO: ${{ inputs.repository }}
+          PRS:      ${{ steps.combine.outputs.PR_LIST }}
+          REPO:     ${{ inputs.repository }}
         run: |
           set -euo pipefail
           BLOCKERS=()
@@ -170,7 +176,7 @@ jobs:
             git branch -D "pr-$PR" || true
           done
           if [ ${#BLOCKERS[@]} -gt 0 ]; then
-            echo "blockers=$(IFS=,; echo "${BLOCKERS[*]}")" >> "$GITHUB_OUTPUT"
+            echo "blockers=$(IFS=,; echo "${BLOCKERS[*]}")" >> "$GITHUBOUTPUT"
             exit 1
           fi
 
@@ -178,8 +184,8 @@ jobs:
         if: ${{ steps.preflight.outcome == 'failure' && steps.preflight.outputs.blockers != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ inputs.repository }}
-          BASE: ${{ steps.form.outputs.BASE }}
+          REPO:     ${{ inputs.repository }}
+          BASE:     ${{ steps.form.outputs.BASE }}
         run: |
           set -euo pipefail
           IFS=, read -ra arr <<< "${{ steps.preflight.outputs.blockers }}"
@@ -193,9 +199,9 @@ jobs:
         if: ${{ steps.preflight.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          PRS: ${{ steps.combine.outputs.PR_LIST }}
-          BASE: ${{ steps.form.outputs.BASE }}
-          REPO: ${{ inputs.repository }}
+          PRS:      ${{ steps.combine.outputs.PR_LIST }}
+          BASE:     ${{ steps.form.outputs.BASE }}
+          REPO:     ${{ inputs.repository }}
         run: |
           set -euo pipefail
           IFS=, read -ra arr <<< "$PRS"
@@ -217,28 +223,30 @@ jobs:
             fi
             git branch -D "pr-$PR" || true
           done
-          if git diff --quiet origin/main..HEAD; then
+          # detect if anything differs from target branch
+          if git fetch origin ${{ inputs.target_branch }}:${{ inputs.target_branch }} && git diff --quiet origin/${{ inputs.target_branch }}..HEAD; then
             echo "HAS_CHANGES=false" >> "$GITHUB_OUTPUT"
           else
             echo "HAS_CHANGES=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Push release branch and open PR to main
+      - name: Push release branch and open PR to target
         if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ steps.mk.outputs.BRANCH }}
-          REPO: ${{ inputs.repository }}
-          TITLE: ${{ steps.form.outputs.TITLE }}
-          BASE:  ${{ steps.form.outputs.BASE }}
-          DAYS:  ${{ steps.form.outputs.DAYS_BACK }}
-          GH_USER: ${{ steps.form.outputs.GH_USERNAME }}
+          BRANCH:   ${{ steps.mk.outputs.BRANCH }}
+          REPO:     ${{ inputs.repository }}
+          TITLE:    ${{ steps.form.outputs.TITLE }}
+          BASE:     ${{ steps.form.outputs.BASE }}
+          DAYS:     ${{ steps.form.outputs.DAYS_BACK }}
+          GH_USER:  ${{ steps.form.outputs.GH_USERNAME }}
+          TARGET:   ${{ inputs.target_branch }}
         run: |
           set -euo pipefail
           git push -u origin "$BRANCH"
           EXIST=$(gh pr list --repo "$REPO" --head "$BRANCH" --state all --json number --jq '.[0].number' || true)
           if [ -z "${EXIST:-}" ]; then
-            gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+            gh pr create --repo "$REPO" --base "$TARGET" --head "$BRANCH" \
               --title "$TITLE" \
               --body "Author: @$GH_USER | Base: \`$BASE\` | Lookback: \`$DAYS\` days"
           fi
@@ -248,8 +256,8 @@ jobs:
         if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ steps.mk.outputs.BRANCH }}
-          REPO: ${{ inputs.repository }}
+          BRANCH:   ${{ steps.mk.outputs.BRANCH }}
+          REPO:     ${{ inputs.repository }}
         run: |
           set -euo pipefail
           j=$(gh pr list --repo "$REPO" --head "$BRANCH" --state all --json number,url,title,baseRefName,headRefName,author --jq '.[0]')
@@ -261,8 +269,8 @@ jobs:
           echo "head=$(jq -r .headRefName <<<"$j")"    >> "$GITHUB_OUTPUT"
           echo "author=$(jq -r .author.login <<<"$j")" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Slack (optional)
-        if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' && inputs.slack_channel != '' }}
+      - name: Notify Slack via bot (optional)
+        if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' && steps.pr.outputs.base == ${{ inputs.target_branch }} }}
         uses: slackapi/slack-github-action@v1
         with:
           channel-id: ${{ inputs.slack_channel }}
@@ -273,8 +281,14 @@ jobs:
               "blocks": [
                 { "type": "header", "text": { "type": "plain_text", "text": "${{ steps.form.outputs.TITLE }}", "emoji": true } },
                 { "type": "section", "text": { "type": "mrkdwn",
-                  "text": "*Repo:* ${{ inputs.repository }}\n*Author:* @${{ steps.form.outputs.GH_USERNAME }}\n*PR:* <${{ steps.pr.outputs.url }}|#${{ steps.pr.outputs.number }}>\n*Target:* ${{ steps.pr.outputs.base }}\n*Filter:* author:@${{ steps.form.outputs.GH_USERNAME }} base:${{ steps.form.outputs.BASE }} lookback:${{ steps.form.outputs.DAYS_BACK }}d\ncc: ${{ steps.form.outputs.SLACK_CC }}"
-                }}
+                  "text": "*Repo:* ${{ github.repository }}\n*Author:* @${{ steps.form.outputs.GH_USERNAME }}\n*PR:* <${{ steps.pr.outputs.url }}|#${{ steps.pr.outputs.number }} — ${{ steps.form.outputs.TITLE }}>\n*Target branch:* ${{ steps.pr.outputs.base }}\n*Filter:* Author: @${{ steps.form.outputs.GH_USERNAME }} | Base: ${{ steps.form.outputs.BASE }} | Lookback: ${{ steps.form.outputs.DAYS_BACK }} days"
+                }},
+                { "type": "context", "elements": [
+                  { "type": "mrkdwn", "text": "cc: ${{ steps.form.outputs.SLACK_CC }}" }
+                ]},
+                { "type": "actions", "elements": [
+                  { "type": "button", "text": { "type": "plain_text", "text": "Open PR" }, "url": "${{ steps.pr.outputs.url }}", "style": "primary" }
+                ]}
               ]
             }
         env:
