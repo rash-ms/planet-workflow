@@ -1,4 +1,4 @@
-name: Enforce PR Gate (reusable)
+name: main-pr-checks
 
 on:
   workflow_call:

@@ -1,4 +1,4 @@
-name: Stage PR validation (reusable)
+name: stage-pr-checks
 
 on:
   workflow_call:

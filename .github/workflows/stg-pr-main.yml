@@ -1,4 +1,4 @@
-name: Stg PR to Main with Issue Form
+name: stg-pr-main
 
 on: 
   workflow_call:
