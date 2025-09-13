@@ -179,6 +179,7 @@ jobs:
             PR=$(echo "$PR" | xargs)
             git reset --hard
             git fetch --no-tags origin "pull/$PR/head:pr-$PR"
+            
             if ! git merge --no-commit --squash "pr-$PR" >/dev/null 2>&1; then
               echo "::error::Would conflict when applying PR #$PR"
               BLOCKERS+=("$PR")
@@ -335,16 +336,18 @@ jobs:
           gh issue close ${{ inputs.issue_number }} --repo ${{ inputs.repository }} \
             --comment "Closed by release workflow. Opened PR: ${{ steps.pr.outputs.url }}"
 
-      - name: Cleanup release branch
-        if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' }}
+      - name: Cleanup PR temps
+        if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO:     ${{ inputs.repository }}
-          BRANCH:   ${{ steps.mk.outputs.BRANCH }}
+          PRS: ${{ steps.combine.outputs.PR_LIST }}
         run: |
           set -euo pipefail
-          echo "Cleaning up branch: $BRANCH"
-          # Delete the temporary release branch from remote
-          git push origin --delete "$BRANCH" || true
-          # Delete local branch
-          git branch -D "$BRANCH" || true
+          [ -z "${PRS:-}" ] && exit 0
+          for P in ${PRS//,/ }; do
+            git branch -D "pr-$P" 2>/dev/null || true
+            git update-ref -d "refs/pull/$P/head" 2>/dev/null || true
+            git update-ref -d "refs/remotes/origin/pull/$P/head" 2>/dev/null || true
+          done
+          git remote prune origin || true
+          git gc --prune=now --aggressive || true
+
