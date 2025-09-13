@@ -1,0 +1,115 @@
+name: Stage PR validation (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      base_branch:         # the PR target env branch (e.g., staging, preprod)
+        type: string
+        required: false
+        default: "staging"
+      trunk_branch:        # your “source-of-truth” branch (e.g., main, develop)
+        type: string
+        required: false
+        default: "main"
+      pr_head:             # feature branch name (from caller)
+        type: string
+        required: true
+      repository:          # owner/repo (from caller)
+        type: string
+        required: true
+    secrets: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync_and_gate:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sync-${{ inputs.base_branch }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Validate branches exist on remote
+        shell: bash
+        run: |
+          set -e
+          for BR in "${{ inputs.trunk_branch }}" "${{ inputs.base_branch }}"; do
+            if ! git ls-remote --exit-code origin "refs/heads/$BR" >/dev/null; then
+              echo "::error::Branch '$BR' not found on origin."; exit 1
+            fi
+          done
+
+      - name: Fetch refs
+        run: |
+          git fetch origin +refs/heads/${{ inputs.trunk_branch }}:refs/remotes/origin/${{ inputs.trunk_branch }}
+          git fetch origin +refs/heads/${{ inputs.base_branch }}:refs/remotes/origin/${{ inputs.base_branch }}
+
+      # 1) Try to fast-forward base to trunk (or clean merge)
+      - name: Fast-forward base to trunk if possible
+        id: ff
+        shell: bash
+        run: |
+          set -e
+          if git merge-base --is-ancestor origin/${{ inputs.base_branch }} origin/${{ inputs.trunk_branch }}; then
+            echo "base_ahead_or_equal=1" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+      - name: Push sync (FF or clean merge)
+        id: pushsync
+        shell: bash
+        run: |
+          set -e
+          if git merge-base --is-ancestor origin/${{ inputs.trunk_branch }} origin/${{ inputs.base_branch }}; then
+            echo "already_contains_trunk=1" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          git checkout -B ${{ inputs.base_branch }} origin/${{ inputs.base_branch }}
+          if git merge-base --is-ancestor origin/${{ inputs.base_branch }} origin/${{ inputs.trunk_branch }}; then
+            git merge --ff-only origin/${{ inputs.trunk_branch }} || true
+          else
+            git merge --no-edit origin/${{ inputs.trunk_branch }} || { echo "::error::Conflicts syncing ${{ inputs.trunk_branch }} → ${{ inputs.base_branch }}. Resolve manually."; exit 1; }
+          fi
+          git push origin HEAD:${{ inputs.base_branch }}
+
+      - name: Verify base now contains trunk
+        shell: bash
+        run: |
+          git fetch origin +refs/heads/${{ inputs.base_branch }}:refs/remotes/origin/${{ inputs.base_branch }}
+          if ! git merge-base --is-ancestor origin/${{ inputs.trunk_branch }} origin/${{ inputs.base_branch }}; then
+            echo "::error::${{ inputs.base_branch }} is not synced with ${{ inputs.trunk_branch }} (conflicts likely)."
+            exit 1
+          fi
+
+      # 2) Ensure PR head contains latest base
+      - name: Ensure PR head contains base (auto-merge)
+        shell: bash
+        run: |
+          if ! git merge-base --is-ancestor origin/${{ inputs.base_branch }} HEAD; then
+            git merge --no-edit --no-ff origin/${{ inputs.base_branch }} || {
+              echo "::error::Conflicts merging ${{ inputs.base_branch }} into your branch. Please merge/rebase locally and push.";
+              exit 1
+            }
+            git push origin "HEAD:${{ inputs.pr_head }}"
+          fi
+
+      # 3) Final gate
+      - name: Final gate
+        shell: bash
+        run: |
+          git fetch origin +refs/heads/${{ inputs.base_branch }}:refs/remotes/origin/${{ inputs.base_branch }}
+          if ! git merge-base --is-ancestor origin/${{ inputs.base_branch }} HEAD; then
+            echo "::error::Your branch is not up to date with ${{ inputs.base_branch }}."
+            exit 1
+          fi

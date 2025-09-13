@@ -1,0 +1,82 @@
+name: Enforce PR Gate (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      base_branch:
+        description: "Target branch to enforce (e.g. main, release, prod)"
+        type: string
+        required: false
+        default: "main"
+      required_label:
+        description: "Label that allows non-bot PRs"
+        type: string
+        required: false
+        default: "release-request"
+      allowed_bot:
+        description: "Bot username that can open PRs"
+        type: string
+        required: false
+        default: "github-actions[bot]"
+
+permissions:
+  contents: read
+  pull-requests: write   # to comment/close PR
+  issues: write          # to comment
+
+jobs:
+  gate:
+    name: Bot-or-label gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate gate
+        env:
+          GH_TOKEN: ${{ github.token }}        # auth for gh CLI
+          REPO: ${{ github.repository }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          REQUIRED_LABEL: ${{ inputs.required_label }}
+          ALLOWED_BOT: ${{ inputs.allowed_bot }}
+        run: |
+          set -euo pipefail
+
+          # Exit early if PR isn't targeting the configured base branch
+          if [[ "${{ github.event.pull_request.base.ref }}" != "$BASE_BRANCH" ]]; then
+            echo "Not targeting $BASE_BRANCH; skipping gate."
+            exit 0
+          fi
+
+          PR=$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")
+          AUTHOR=$(jq -r '.pull_request.user.login' "$GITHUB_EVENT_PATH")
+
+          # Fetch labels fresh (case-insensitive check)
+          readarray -t LABELS < <(gh api "repos/$REPO/issues/$PR/labels" --jq '.[].name' | tr '[:upper:]' '[:lower:]')
+          REQ=$(echo "$REQUIRED_LABEL" | tr '[:upper:]' '[:lower:]')
+
+          echo "PR #$PR author=$AUTHOR base=$BASE_BRANCH labels=${LABELS[*]}"
+
+          # Pass if the PR author is the allowed bot
+          if [[ "$AUTHOR" == "$ALLOWED_BOT" ]]; then
+            echo "PASS: opened by $ALLOWED_BOT"
+            exit 0
+          fi
+
+          # Pass if the required label is present
+          if printf '%s\n' "${LABELS[@]}" | grep -qx "$REQ"; then
+            echo "PASS: label '$REQ' present"
+            exit 0
+          fi
+
+          echo "::error::Blocked: PRs to '$BASE_BRANCH' must be opened by '$ALLOWED_BOT' OR have label '$REQUIRED_LABEL'."
+          exit 1
+
+      - name: Comment & close non-compliant PR
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_LABEL: ${{ inputs.required_label }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          ALLOWED_BOT: ${{ inputs.allowed_bot }}
+        run: |
+          PR=$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")
+          gh pr comment "$PR" --body "This branch (\`$BASE_BRANCH\`) only accepts PRs opened by \`$ALLOWED_BOT\` or labeled \`$REQUIRED_LABEL\`."
+          gh pr close "$PR"
