@@ -336,18 +336,21 @@ jobs:
           gh issue close ${{ inputs.issue_number }} --repo ${{ inputs.repository }} \
             --comment "Closed by release workflow. Opened PR: ${{ steps.pr.outputs.url }}"
 
-      - name: Cleanup PR temps
-        if: always()
+      - name: Cleanup release branch
+        if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' }}
         env:
           PRS: ${{ steps.combine.outputs.PR_LIST }}
         run: |
           set -euo pipefail
-          [ -z "${PRS:-}" ] && exit 0
+          [ -z "${PRS:-}" ] && { echo "No PRs to clean."; exit 0; }
+
+          echo "Cleaning PRs: $PRS"
           for P in ${PRS//,/ }; do
-            git branch -D "pr-$P" 2>/dev/null || true
+            echo "Deleting refs for PR #$P"
+            git branch -D "pr-$P"       2>/dev/null || true
             git update-ref -d "refs/pull/$P/head" 2>/dev/null || true
             git update-ref -d "refs/remotes/origin/pull/$P/head" 2>/dev/null || true
           done
+
           git remote prune origin || true
           git gc --prune=now --aggressive || true
-
