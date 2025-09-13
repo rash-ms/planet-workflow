@@ -8,9 +8,6 @@ on:
         type: string
         required: false
         default: "main"
-      repository: # owner/repo (from caller)
-        type: string
-        required: true
       required_label:
         description: "Label that allows non-bot PRs"
         type: string
