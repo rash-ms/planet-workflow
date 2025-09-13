@@ -40,6 +40,32 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Auto Label PR
+        if: ${{ startsWith(inputs.pr_head, 'np/') || startsWith(inputs.pr_head, 'wip/') }}
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          LABEL: skip-prod
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GH_REPO/labels/$LABEL")
+          if [ "$code" -ne 200 ]; then
+            curl -sS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GH_REPO/labels" \
+              -d "{\"name\":\"$LABEL\",\"color\":\"0e8a16\",\"description\":\"PRs from non-prod branches\"}" >/dev/null
+          fi
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GH_REPO/issues/$PR_NUMBER/labels" \
+            -d "{\"labels\":[\"$LABEL\"]}" >/dev/null
+
       - name: Validate branches exist on remote
         shell: bash
         run: |

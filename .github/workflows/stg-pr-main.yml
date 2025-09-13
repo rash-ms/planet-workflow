@@ -27,6 +27,11 @@ on:
       slack_bot_token:
         required: false
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
 concurrency:
   group: release-issue-${{ inputs.issue_number }}
   cancel-in-progress: true
@@ -60,16 +65,25 @@ jobs:
           BODY="$RUNNER_TEMP/body.txt"
           printf '%s\n' "$ISSUE_BODY" > "$BODY"
 
+          # Title from Issue (single line)
+          TITLE=$(jq -r '.issue.title' "$GITHUB_EVENT_PATH" | tr -d '\r' | head -n1)
+
           # helpers to extract fields from the Issue Form body
           get_field () {
             awk -v prefix="$1" 'BEGIN{flag=0}
-              /^###[[:space:]]/{ line=$0; sub(/^###[[:space:]]*/,"",line); flag=(index(line,prefix)==1); next }
+              /^###[[:space:]]/{
+                line=$0; sub(/^###[[:space:]]*/,"",line)
+                flag=(index(line,prefix)==1); next
+              }
               flag { print }
             ' "$BODY" | sed '/^[[:space:]]*$/d' | head -n1 | xargs
           }
           get_section_lines () {
             awk -v prefix="$1" 'BEGIN{flag=0}
-              /^###[[:space:]]/{ line=$0; sub(/^###[[:space:]]*/,"",line); flag=(index(line,prefix)==1); next }
+              /^###[[:space:]]/{
+                line=$0; sub(/^###[[:space:]]*/,"",line)
+                flag=(index(line,prefix)==1); next
+              }
               flag { print }
             ' "$BODY" | sed '/^[[:space:]]*$/d'
           }
@@ -78,7 +92,7 @@ jobs:
           BASE=$(get_field "Base PRs branch (e.g. staging)")
           STATE=$(get_field "PR status")
           DAYS_BACK=$(get_field "Lookback window (days)")
-          TITLE=$(get_field "Release: <short description>")
+          SKIP_LABEL=$(get_field "Prod Hold (label name)")   # <- comes from your Issue Form (value: "skip-prod")
           SLACK_CC=$(get_section_lines "Reviewer" | sed 's/^- *//' | paste -sd' ' - || true)
 
           EXTRA=$(
@@ -86,7 +100,8 @@ jobs:
             | sed 's#.*/pull/##' | sed 's/[^0-9].*$//' | grep -E '^[0-9]+$' || true
           )
 
-          for var in GH_USERNAME BASE STATE DAYS_BACK; do
+          # Required fields (including the skip label from the form)
+          for var in GH_USERNAME BASE STATE DAYS_BACK SKIP_LABEL; do
             eval v=\$$var
             [ -n "$v" ] || { echo "::error::$var is required in the issue form"; exit 1; }
           done
@@ -102,7 +117,8 @@ jobs:
             echo "DAYS_BACK=$DAYS_BACK"
             echo "SLACK_CC=$SLACK_CC"
             echo "EXTRA=$(echo "$EXTRA" | paste -sd, -)"
-            echo "TITLE=${TITLE:-Release ${{ inputs.issue_number }}}"
+            echo "TITLE=$TITLE"
+            echo "SKIP_LABEL=$SKIP_LABEL"
           } >> "$GITHUB_OUTPUT"
 
       - name: Find PRs by author/base/state updated within days_back
@@ -173,7 +189,7 @@ jobs:
             git branch -D "pr-$PR" || true
           done
           if [ ${#BLOCKERS[@]} -gt 0 ]; then
-            echo "blockers=$(IFS=,; echo "${BLOCKERS[*]}")" >> "$GITHUBOUTPUT"
+            echo "blockers=$(IFS=,; echo "${BLOCKERS[*]}")" >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
@@ -195,23 +211,42 @@ jobs:
         id: merge
         if: ${{ steps.preflight.outcome == 'success' }}
         env:
-          GH_TOKEN: ${{ github.token }}
-          PRS:      ${{ steps.combine.outputs.PR_LIST }}
-          BASE:     ${{ steps.form.outputs.BASE }}
-          REPO:     ${{ inputs.repository }}
+          GH_TOKEN:      ${{ github.token }}
+          PRS:           ${{ steps.combine.outputs.PR_LIST }}
+          BASE:          ${{ steps.form.outputs.BASE }}
+          REPO:          ${{ inputs.repository }}
+          EXCLUDE_LABEL: ${{ steps.form.outputs.SKIP_LABEL }}   # e.g. "skip-prod" from Issue Form
+          TARGET:        ${{ inputs.target_branch }}
         run: |
           set -euo pipefail
+
+          # Always exclude any PR that carries the skip label when building the prod release PR.
           IFS=, read -ra arr <<< "$PRS"
           for PR in "${arr[@]}"; do
             PR=$(echo "$PR" | xargs)
+
+            # Skip any PR carrying the exclusion label (case-insensitive)
+            if gh pr view "$PR" --repo "$REPO" --json labels --jq \
+               ".labels[].name | ascii_downcase" | grep -xqi "$(echo "$EXCLUDE_LABEL" | tr '[:upper:]' '[:lower:]')"; then
+              echo "Skipping PR #$PR (has label '$EXCLUDE_LABEL')."
+              continue
+            fi
+
             BASE_REF=$(gh pr view "$PR" --repo "$REPO" --json baseRefName --jq .baseRefName)
             if [ "$BASE_REF" != "$BASE" ]; then
               echo "::error::PR #$PR targets '$BASE_REF' but you selected base '$BASE'."; exit 1
             fi
+
             TITLE=$(gh pr view "$PR" --repo "$REPO" --json title --jq .title)
             echo "Including PR #$PR — $TITLE"
+
             git fetch --no-tags origin "pull/$PR/head:pr-$PR"
-            git merge --squash "pr-$PR" || { echo "::error::Merge conflicts while squashing PR #$PR"; git merge --abort || git reset --merge || git reset --hard; exit 1; }
+            git merge --squash "pr-$PR" || {
+              echo "::error::Merge conflicts while squashing PR #$PR"
+              git merge --abort || git reset --merge || git reset --hard
+              exit 1
+            }
+
             if git diff --cached --quiet; then
               echo "No changes from PR #$PR (already on base)."
               git reset
@@ -220,6 +255,7 @@ jobs:
             fi
             git branch -D "pr-$PR" || true
           done
+
           # detect if anything differs from target branch
           if git fetch origin ${{ inputs.target_branch }}:${{ inputs.target_branch }} && git diff --quiet origin/${{ inputs.target_branch }}..HEAD; then
             echo "HAS_CHANGES=false" >> "$GITHUB_OUTPUT"
@@ -298,3 +334,17 @@ jobs:
         run: |
           gh issue close ${{ inputs.issue_number }} --repo ${{ inputs.repository }} \
             --comment "Closed by release workflow. Opened PR: ${{ steps.pr.outputs.url }}"
+
+      - name: Cleanup release branch
+        if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO:     ${{ inputs.repository }}
+          BRANCH:   ${{ steps.mk.outputs.BRANCH }}
+        run: |
+          set -euo pipefail
+          echo "Cleaning up branch: $BRANCH"
+          # Delete the temporary release branch from remote
+          git push origin --delete "$BRANCH" || true
+          # Delete local branch
+          git branch -D "$BRANCH" || true
