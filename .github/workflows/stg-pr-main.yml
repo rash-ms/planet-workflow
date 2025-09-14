@@ -12,25 +12,28 @@ on:
       issue_opener:
         type: string
         required: true
-      repository:            # owner/repo of the target repo
+      repository:            
         type: string
         required: true
       slack_channel:
         type: string
         required: false
         default: ""
-      target_branch:         # PR will be opened against this branch (was 'main')
+      skip_pr:        
+        type: string
+        required: false
+        default: "main" 
+      base_branch:         
+        type: string
+        required: false
+        default: "main"
+      target_branch:        
         type: string
         required: false
         default: "main"
     secrets:
       slack_bot_token:
         required: false
-
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
 
 concurrency:
   group: release-issue-${{ inputs.issue_number }}
@@ -89,19 +92,12 @@ jobs:
           }
 
           GH_USERNAME=$(get_field "GitHub username")
-          BASE=$(get_field "Base PRs branch (e.g. staging)")
           STATE=$(get_field "PR status")
           DAYS_BACK=$(get_field "Lookback window (days)")
-          SKIP_LABEL=$(get_field "Prod Hold (label name)")   # <- comes from your Issue Form (value: "skip-prod")
           SLACK_CC=$(get_section_lines "Reviewer" | sed 's/^- *//' | paste -sd' ' - || true)
 
-          EXTRA=$(
-            get_section_lines "Extra PR numbers or URLs to include (optional)" \
-            | sed 's#.*/pull/##' | sed 's/[^0-9].*$//' | grep -E '^[0-9]+$' || true
-          )
-
           # Required fields (including the skip label from the form)
-          for var in GH_USERNAME BASE STATE DAYS_BACK SKIP_LABEL; do
+          for var in GH_USERNAME STATE DAYS_BACK; do
             eval v=\$$var
             [ -n "$v" ] || { echo "::error::$var is required in the issue form"; exit 1; }
           done
@@ -112,13 +108,10 @@ jobs:
 
           {
             echo "GH_USERNAME=$GH_USERNAME"
-            echo "BASE=$BASE"
             echo "STATE=$STATE"
             echo "DAYS_BACK=$DAYS_BACK"
             echo "SLACK_CC=$SLACK_CC"
-            echo "EXTRA=$(echo "$EXTRA" | paste -sd, -)"
             echo "TITLE=$TITLE"
-            echo "SKIP_LABEL=$SKIP_LABEL"
           } >> "$GITHUB_OUTPUT"
 
       - name: Find PRs by author/base/state updated within days_back
@@ -126,8 +119,8 @@ jobs:
         env:
           GH_TOKEN:     ${{ github.token }}
           REPO:         ${{ inputs.repository }}
+          BASE:         ${{ inputs.base_branch }}
           GH_USERNAME:  ${{ steps.form.outputs.GH_USERNAME }}
-          BASE:         ${{ steps.form.outputs.BASE }}
           STATE:        ${{ steps.form.outputs.STATE }}
           DAYS:         ${{ steps.form.outputs.DAYS_BACK }}
         run: |
@@ -141,17 +134,7 @@ jobs:
                              --json number --jq '.[].number' || true)
           [ -n "${CAND:-}" ] || { echo "::error::No PRs found for author=$GH_USERNAME base=$BASE state=$STATE updated:>=$SINCE"; exit 1; }
           PRS=$(printf '%s\n' $CAND | sort -u | paste -sd, -)
-          echo "PRS=$PRS" >> "$GITHUB_OUTPUT"
-
-      - name: Combine with any extra PRs
-        id: combine
-        run: |
-          A="${{ steps.find.outputs.PRS }}"
-          B="${{ steps.form.outputs.EXTRA }}"
-          LIST=$(printf "%s\n%s\n" "$A" "$B" | tr ',' '\n' | grep -E '^[0-9]+$' | sort -u | paste -sd, -)
-          [ -n "$LIST" ] || { echo "::error::No PRs to include after combining."; exit 1; }
-          echo "PR_LIST=$LIST" >> "$GITHUB_OUTPUT"
-          echo "Including: $LIST"
+          echo "PR_LIST=$PRS" >> "$GITHUB_OUTPUT"
 
       - name: Create release branch from selected base
         id: mk
@@ -159,22 +142,27 @@ jobs:
           set -euo pipefail
           USER_SLUG='${{ inputs.issue_opener }}'
           BR="${USER_SLUG}/${{ github.run_id }}-${{ github.run_attempt }}"
-          BASE='${{ steps.form.outputs.BASE }}'
-          git fetch origin "$BASE"
-          git switch -c "$BR" "origin/$BASE"
+          BASE='${{ inputs.base_branch }}'
+
+          # git fetch origin "$BASE"
+          # git switch -c "$BR" "origin/$BASE"
+
+          git fetch origin ${{ inputs.target_branch }}
+          git switch -c "$BR" origin/${{ inputs.target_branch }}
+
           echo "BRANCH=$BR"  >> "$GITHUB_OUTPUT"
           echo "BASE=$BASE"  >> "$GITHUB_OUTPUT"
 
-      - name: Preflight — fail if any PR conflicts
-        id: preflight
+      - name: Mergeability check (fail on conflicts)
+        id: detect_blockers
         env:
           GH_TOKEN: ${{ github.token }}
-          PRS:      ${{ steps.combine.outputs.PR_LIST }}
+          PR_LIST:  ${{ steps.find.outputs.PR_LIST }}
           REPO:     ${{ inputs.repository }}
         run: |
           set -euo pipefail
           BLOCKERS=()
-          IFS=, read -ra arr <<< "$PRS"
+          IFS=, read -ra arr <<< "$PR_LIST"
           for PR in "${arr[@]}"; do
             PR=$(echo "$PR" | xargs)
             git reset --hard
@@ -195,14 +183,14 @@ jobs:
           fi
 
       - name: Notify blockers to rebase
-        if: ${{ steps.preflight.outcome == 'failure' && steps.preflight.outputs.blockers != '' }}
+        if: ${{ steps.detect_blockers.outcome == 'failure' && steps.detect_blockers.outputs.blockers != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPO:     ${{ inputs.repository }}
-          BASE:     ${{ steps.form.outputs.BASE }}
+          BASE:     ${{ inputs.base_branch }}
         run: |
           set -euo pipefail
-          IFS=, read -ra arr <<< "${{ steps.preflight.outputs.blockers }}"
+          IFS=, read -ra arr <<< "${{ steps.detect_blockers.outputs.blockers }}"
           for PR in "${arr[@]}"; do
             PR=$(echo "$PR" | xargs)
             gh pr comment "$PR" --repo "$REPO" --body "This PR conflicts with the release build. Please update your branch to \`$BASE\` and push again."
@@ -210,38 +198,41 @@ jobs:
 
       - name: Merge selected PRs (squash commits; fail on conflict)
         id: merge
-        if: ${{ steps.preflight.outcome == 'success' }}
+        if: ${{ steps.detect_blockers.outcome == 'success' }}
         env:
           GH_TOKEN:      ${{ github.token }}
-          PRS:           ${{ steps.combine.outputs.PR_LIST }}
-          BASE:          ${{ steps.form.outputs.BASE }}
           REPO:          ${{ inputs.repository }}
-          EXCLUDE_LABEL: ${{ steps.form.outputs.SKIP_LABEL }}   # e.g. "skip-prod" from Issue Form
+          BASE:          ${{ inputs.base_branch }}
           TARGET:        ${{ inputs.target_branch }}
+          PR_LIST:       ${{ steps.find.outputs.PR_LIST }}
+          SKIP_PR:    ${{ inputs.skip_pr }}   
+          
         run: |
           set -euo pipefail
 
           # Always exclude any PR that carries the skip label when building the prod release PR.
-          IFS=, read -ra arr <<< "$PRS"
+          IFS=, read -ra arr <<< "$PR_LIST"
           for PR in "${arr[@]}"; do
             PR=$(echo "$PR" | xargs)
 
             # Skip any PR carrying the exclusion label (case-insensitive)
             if gh pr view "$PR" --repo "$REPO" --json labels --jq \
-               ".labels[].name | ascii_downcase" | grep -xqi "$(echo "$EXCLUDE_LABEL" | tr '[:upper:]' '[:lower:]')"; then
-              echo "Skipping PR #$PR (has label '$EXCLUDE_LABEL')."
+               ".labels[].name | ascii_downcase" | grep -xqi "$(echo "$SKIP_PR" | tr '[:upper:]' '[:lower:]')"; then
+              echo "Skipping PR #$PR (has label '$SKIP_PR')."
               continue
             fi
 
             BASE_REF=$(gh pr view "$PR" --repo "$REPO" --json baseRefName --jq .baseRefName)
-            if [ "$BASE_REF" != "$BASE" ]; then
-              echo "::error::PR #$PR targets '$BASE_REF' but you selected base '$BASE'."; exit 1
-            fi
+
+            # if [ "$BASE_REF" != "$BASE" ]; then
+            #   echo "::error::PR #$PR targets '$BASE_REF' but you selected base '$BASE'."; exit 1
+            # fi
 
             TITLE=$(gh pr view "$PR" --repo "$REPO" --json title --jq .title)
             echo "Including PR #$PR — $TITLE"
 
             git fetch --no-tags origin "pull/$PR/head:pr-$PR"
+
             git merge --squash "pr-$PR" || {
               echo "::error::Merge conflicts while squashing PR #$PR"
               git merge --abort || git reset --merge || git reset --hard
@@ -271,9 +262,9 @@ jobs:
           BRANCH:   ${{ steps.mk.outputs.BRANCH }}
           REPO:     ${{ inputs.repository }}
           TITLE:    ${{ steps.form.outputs.TITLE }}
-          BASE:     ${{ steps.form.outputs.BASE }}
           DAYS:     ${{ steps.form.outputs.DAYS_BACK }}
           GH_USER:  ${{ steps.form.outputs.GH_USERNAME }}
+          BASE:     ${{ inputs.base_branch }}
           TARGET:   ${{ inputs.target_branch }}
         run: |
           set -euo pipefail
@@ -339,13 +330,13 @@ jobs:
       - name: Cleanup release branch
         if: ${{ steps.merge.outputs.HAS_CHANGES == 'true' }}
         env:
-          PRS: ${{ steps.combine.outputs.PR_LIST }}
+          PR_LIST: ${{ steps.find.outputs.PR_LIST }}
         run: |
           set -euo pipefail
-          [ -z "${PRS:-}" ] && { echo "No PRs to clean."; exit 0; }
+          [ -z "${PR_LIST:-}" ] && { echo "No PRs to clean."; exit 0; }
 
-          echo "Cleaning PRs: $PRS"
-          for P in ${PRS//,/ }; do
+          echo "Cleaning PRs: $PR_LIST"
+          for P in ${PR_LIST//,/ }; do
             echo "Deleting refs for PR #$P"
             git branch -D "pr-$P"       2>/dev/null || true
             git update-ref -d "refs/pull/$P/head" 2>/dev/null || true
