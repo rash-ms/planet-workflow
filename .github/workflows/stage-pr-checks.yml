@@ -53,30 +53,82 @@ jobs:
 
       # 🔒 Hard rule: staging must already include main (kept in a separate sync workflow)
       - name: Assert base contains trunk
+        shell: bash
+        env:
+          TRUNK: ${{ inputs.trunk_branch }}
+          BASE:  ${{ inputs.base_branch }}
         run: |
           set -euo pipefail
-          git fetch origin +refs/heads/${{ inputs.trunk_branch }}:origin/${{ inputs.trunk_branch }} \
-                           +refs/heads/${{ inputs.base_branch }}:origin/${{ inputs.base_branch }}
-          if ! git merge-base --is-ancestor origin/${{ inputs.trunk_branch }} origin/${{ inputs.base_branch }}; then
-            echo "::error::${{ inputs.base_branch }} is behind ${{ inputs.trunk_branch }}. Run/merge the main→staging sync first."
+
+          # Clean up any mistaken local branches called origin/<name> from older runs
+          git show-ref --verify --quiet "refs/heads/origin/$TRUNK" && git branch -D "origin/$TRUNK"
+          git show-ref --verify --quiet "refs/heads/origin/$BASE"  && git branch -D "origin/$BASE"
+
+          # Fetch remote-tracking refs normally
+          git fetch --prune --no-tags origin
+
+          MAIN_REF="refs/remotes/origin/$TRUNK"
+          BASE_REF="refs/remotes/origin/$BASE"
+
+          # Sanity check the refs exist
+          git show-ref --verify --quiet "$MAIN_REF" || { echo "::error::Missing $MAIN_REF"; exit 1; }
+          git show-ref --verify --quiet "$BASE_REF" || { echo "::error::Missing $BASE_REF"; exit 1; }
+
+          # Hard rule: base must already include trunk (main ⊆ staging)
+          if ! git merge-base --is-ancestor "$MAIN_REF" "$BASE_REF"; then
+            echo "::error::$BASE is behind $TRUNK. Run/merge the $TRUNK→$BASE sync first."
             exit 1
           fi
 
+
       # ✅ Bring latest staging into the PR head (or fail fast if conflicts)
+      # - name: Ensure PR head contains base
+      #   env:
+      #     HEAD_REF: ${{ inputs.pr_head }}
+      #   run: |
+      #     set -euo pipefail
+      #     git fetch origin +refs/heads/${{ inputs.base_branch }}:origin/${{ inputs.base_branch }}
+      #     if ! git merge-base --is-ancestor origin/${{ inputs.base_branch }} HEAD; then
+      #       git merge --no-ff --no-edit origin/${{ inputs.base_branch }} || {
+      #         echo "::error::Conflicts merging ${{ inputs.base_branch }} into ${HEAD_REF}. Please rebase/merge locally and push.";
+      #         exit 1
+      #       }
+      #       # Same-repo PRs can be auto-updated; forks may reject this push
+      #       git push origin "HEAD:${HEAD_REF}" || true
+      #     fi
+
       - name: Ensure PR head contains base
+        shell: bash
         env:
           HEAD_REF: ${{ inputs.pr_head }}
+          BASE:     ${{ inputs.base_branch }}
         run: |
           set -euo pipefail
-          git fetch origin +refs/heads/${{ inputs.base_branch }}:origin/${{ inputs.base_branch }}
-          if ! git merge-base --is-ancestor origin/${{ inputs.base_branch }} HEAD; then
-            git merge --no-ff --no-edit origin/${{ inputs.base_branch }} || {
-              echo "::error::Conflicts merging ${{ inputs.base_branch }} into ${HEAD_REF}. Please rebase/merge locally and push.";
+
+          # We should already be checked out to the PR head (set ref: in checkout step)
+          # Clean up any mistaken local heads called origin/<base>
+          if git show-ref --verify --quiet "refs/heads/origin/$BASE"; then
+            git branch -D "origin/$BASE"
+          fi
+
+          # Refresh remote-tracking refs
+          git fetch --prune --no-tags origin
+
+          BASE_REF="refs/remotes/origin/$BASE"
+
+          # Sanity check
+          git show-ref --verify --quiet "$BASE_REF" || { echo "::error::Missing $BASE_REF"; exit 1; }
+
+          # If PR head doesn't already contain latest base, try to merge it
+          if ! git merge-base --is-ancestor "$BASE_REF" HEAD; then
+            git merge --no-ff --no-edit "$BASE_REF" || {
+              echo "::error::Conflicts merging $BASE into $HEAD_REF. Please rebase/merge locally and push.";
               exit 1
             }
-            # Same-repo PRs can be auto-updated; forks may reject this push
+            # Same-repo PRs can be auto-updated; forks may reject this push (that's OK)
             git push origin "HEAD:${HEAD_REF}" || true
           fi
+
 
       # 🛡️ Preflight: will this PR apply cleanly to main during release?
       - name: Preflight against trunk (main/develop)
