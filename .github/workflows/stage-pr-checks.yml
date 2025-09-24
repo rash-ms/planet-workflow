@@ -82,12 +82,34 @@ jobs:
       - name: Preflight against trunk (main/develop)
         env:
           PR: ${{ inputs.pr_number }}
+          TRUNK: ${{ inputs.trunk_branch }}
+        shell: bash
         run: |
           set -euo pipefail
-          git fetch origin pull/$PR/head:pr-$PR +refs/heads/${{ inputs.trunk_branch }}:origin/${{ inputs.trunk_branch }}
-          git switch -c preflight origin/${{ inputs.trunk_branch }}
-          if ! git merge --no-commit pr-$PR; then
-            echo "::error::This PR won't apply cleanly to '${{ inputs.trunk_branch }}' during release. Rebase on latest staging/main and push again."
+
+          # Clean up any mistaken local branches called origin/<name>
+          if git show-ref --verify --quiet "refs/heads/origin/$TRUNK"; then
+            git branch -D "origin/$TRUNK"
+          fi
+
+          # Get up-to-date remote-tracking refs
+          git fetch --prune --no-tags origin
+          git fetch --no-tags origin "pull/$PR/head:pr-$PR"
+
+          MAIN_REF="refs/remotes/origin/$TRUNK"
+
+          # Sanity check
+          git show-ref --verify --quiet "$MAIN_REF" || { echo "::error::Missing $MAIN_REF"; exit 1; }
+
+          # Try the merge (non-squash so MERGE_HEAD exists on conflict)
+          git switch -c preflight "$MAIN_REF"
+          if ! git merge --no-commit "pr-$PR"; then
+            echo "::error::This PR won't apply cleanly to '$TRUNK' during release. Rebase on latest staging/main and push again."
+            git merge --abort || true
             exit 1
           fi
+
+          # Clean up
           git merge --abort || true
+          git branch -D "pr-$PR" || true
+
